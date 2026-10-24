@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bhandarsetu-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: bhandarsetu
+      POSTGRES_USER: pds_admin
+      POSTGRES_PASSWORD: pds_secret_2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./db/migrations/002_triggers_and_invariants.sql:/docker-entrypoint-initdb.d/02_triggers.sql:ro
+      - ./db/migrations/003_fifo_engine.sql:/docker-entrypoint-initdb.d/03_engine.sql:ro
+      - ./db/migrations/004_views_and_audit.sql:/docker-entrypoint-initdb.d/04_views.sql:ro
+      - ./db/migrations/901_location_and_bin_layer.sql:/docker-entrypoint-initdb.d/05_location_and_bins.sql:ro
+      - ./db/migrations/902_putaway_engine.sql:/docker-entrypoint-initdb.d/06_putaway_engine.sql:ro
+      - ./db/migrations/903_pick_engine.sql:/docker-entrypoint-initdb.d/07_pick_engine.sql:ro
+      - ./db/migrations/904_read_models_and_outbox.sql:/docker-entrypoint-initdb.d/08_read_models.sql:ro
+      - ./db/seed.sql:/docker-entrypoint-initdb.d/09_seed.sql:ro
+      - ./db/demo.sql:/db/demo.sql:ro
+      - ./db/tests:/db/tests:ro
+      - ./db/loadtest:/db/loadtest:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pds_admin -d bhandarsetu"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: bhandarsetu-api
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://pds_admin:pds_secret_2026@postgres:5432/bhandarsetu
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: bhandarsetu-worker
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://pds_admin:pds_secret_2026@postgres:5432/bhandarsetu
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: bhandarsetu-mailhog
+    restart: always
+    ports:
+      - "1025:1025" # SMTP port
+      - "8025:8025" # Web UI
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: bhandarsetu-web
+    restart: always
+    ports:
+      - "3000:80"
+    environment:
+      VITE_API_BASE: http://localhost:8000
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

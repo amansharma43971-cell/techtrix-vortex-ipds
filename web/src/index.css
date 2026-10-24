@@ -1,0 +1,149 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Brand Tokens */
+    --brand-accent: #E8833A;           /* Deep Civic Saffron */
+    --brand-accent-hover: #D67228;
+    --brand-accent-subtle: #FFF7ED;
+    --brand-navy: #14213D;             /* Deep Command Indigo */
+
+    /* Neutral Scale (Warm Slate) - Light Mode */
+    --bg-app: #F7F8FA;
+    --bg-surface: #FFFFFF;
+    --bg-surface-elevated: #FFFFFF;
+    --bg-subtle: #F0F2F5;
+    --border-default: #E4E7EC;
+    --border-strong: #D0D5DD;
+    --text-primary: #101828;
+    --text-secondary: #475467;
+    --text-tertiary: #98A2B3;
+
+    /* Semantic Status Tokens */
+    --status-available: #12A150;
+    --status-available-bg: #E8F8EE;
+    --status-available-border: #A3E5BA;
+
+    --status-near-expiry: #F5A524;
+    --status-near-expiry-bg: #FEF6E7;
+    --status-near-expiry-border: #FCD89C;
+
+    --status-hold: #E5484D;
+    --status-hold-bg: #FEECEE;
+    --status-hold-border: #F8B4B8;
+
+    --status-recall: #B91C1C;
+    --status-recall-bg: #FEF2F2;
+
+    --status-reserved: #3B82F6;
+    --status-reserved-bg: #EFF6FF;
+
+    --status-exhausted: #8A94A6;
+    --status-exhausted-bg: #F1F3F6;
+
+    /* Elevation & Geometry */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+
+    /* Density Tokens (Default: Comfortable) */
+    --table-row-height: 48px;
+    --table-cell-padding-y: 12px;
+    --table-cell-padding-x: 16px;
+  }
+
+  .dark {
+    /* Brand Tokens in Dark Mode */
+    --brand-accent: #F28C38;
+    --brand-accent-hover: #E8833A;
+    --brand-accent-subtle: #2A1D13;
+    --brand-navy: #E0E7FF;
+
+    /* Neutral Scale - Dark Mode */
+    --bg-app: #0B0F14;                 /* Deep Cockpit Charcoal */
+    --bg-surface: #121821;             /* Control Room Surface */
+    --bg-surface-elevated: #182230;
+    --bg-subtle: #1B2432;
+    --border-default: #1F2733;
+    --border-strong: #2D3848;
+    --text-primary: #F2F4F7;
+    --text-secondary: #98A2B3;
+    --text-tertiary: #667085;
+
+    /* Status Backgrounds in Dark Mode */
+    --status-available-bg: #0D2818;
+    --status-available-border: #1B4D2E;
+    --status-near-expiry-bg: #2C1E0A;
+    --status-near-expiry-border: #4D3412;
+    --status-hold-bg: #2C0F11;
+    --status-hold-border: #4D191C;
+    --status-recall-bg: #350A0B;
+    --status-reserved-bg: #0D1E3A;
+    --status-exhausted-bg: #1B212B;
+  }
+
+  /* Compact Mode Overrides */
+  [data-density="compact"] {
+    --table-row-height: 36px;
+    --table-cell-padding-y: 6px;
+    --table-cell-padding-x: 10px;
+  }
+
+  body {
+    background-color: var(--bg-app);
+    color: var(--text-primary);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  /* Tabular Numerals for All Quantities and IDs */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Flash highlight animation for live telemetry updates */
+@keyframes flashAmber {
+  0% {
+    background-color: rgba(232, 131, 58, 0.35);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.animate-flash {
+  animation: flashAmber 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Subtle 180ms page transition animating ONLY view content */
+@keyframes pageTransition {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-pageTransition {
+  animation: pageTransition 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-pageTransition {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+

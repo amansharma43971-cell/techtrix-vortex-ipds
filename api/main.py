@@ -1,18 +1,171 @@
 import json
 import uuid
-import datetime
+import datetime as _dt_module
+from zoneinfo import ZoneInfo
+from datetime import timezone, date, timedelta
+
+class datetime(_dt_module.datetime):
+    pass
+datetime.datetime = _dt_module.datetime
+datetime.timedelta = _dt_module.timedelta
+datetime.timezone = _dt_module.timezone
+datetime.date = _dt_module.date
+
+# Default Business Timezone: Asia/Kolkata (IST = UTC+05:30)
+IST_TIMEZONE = ZoneInfo("Asia/Kolkata")
+UTC_TIMEZONE = timezone.utc
+
+def now_utc() -> datetime:
+    """Current timezone-aware timestamp in UTC for database storage."""
+    return datetime.now(UTC_TIMEZONE)
+
+def now_ist() -> datetime:
+    """Current timezone-aware timestamp in Asia/Kolkata."""
+    return datetime.now(IST_TIMEZONE)
+
+def now_utc_iso() -> str:
+    """ISO 8601 string in UTC."""
+    return datetime.now(UTC_TIMEZONE).isoformat()
+
+def now_ist_str() -> str:
+    """Formatted string in Asia/Kolkata: DD-MM-YYYY hh:mm AM/PM."""
+    return datetime.now(IST_TIMEZONE).strftime("%d-%m-%Y %I:%M %p")
+
+def format_date_ist(d) -> str:
+    """Converts any date or datetime to DD-MM-YYYY in Asia/Kolkata."""
+    if not d:
+        return ""
+    if isinstance(d, str):
+        try:
+            if "T" in d or "+" in d or d.endswith("Z"):
+                d = datetime.fromisoformat(d.replace("Z", "+00:00"))
+            elif "-" in d:
+                parts = d.split("-")
+                if len(parts) == 3 and len(parts[0]) == 4:
+                    return f"{parts[2]}-{parts[1]}-{parts[0]}"
+                return d
+        except Exception:
+            return str(d)
+    if isinstance(d, datetime):
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=UTC_TIMEZONE)
+        return d.astimezone(IST_TIMEZONE).strftime("%d-%m-%Y")
+    if isinstance(d, date):
+        return d.strftime("%d-%m-%Y")
+    return str(d)
+
+def format_datetime_ist(dt) -> str:
+    """Converts any datetime to DD-MM-YYYY hh:mm AM/PM in Asia/Kolkata."""
+    if not dt:
+        return ""
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        except Exception:
+            return dt
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC_TIMEZONE)
+        return dt.astimezone(IST_TIMEZONE).strftime("%d-%m-%Y %I:%M %p")
+    return str(dt)
+
+def validate_chronological_sequence(
+    mfg_date = None,
+    received_date = None,
+    expiry_date = None,
+    due_date = None
+) -> None:
+    """Validates date sequencing, rejecting impossible dates and future intake."""
+    today = date.today()
+    def to_date(val):
+        if not val:
+            return None
+        if isinstance(val, datetime):
+            return val.date()
+        if isinstance(val, date):
+            return val
+        if isinstance(val, str):
+            clean = val.split("T")[0].split(" ")[0]
+            parts = clean.split("-")
+            if len(parts) == 3:
+                if len(parts[0]) == 4:
+                    return date(int(parts[0]), int(parts[1]), int(parts[2]))
+                else:
+                    return date(int(parts[2]), int(parts[1]), int(parts[0]))
+        return None
+
+    m = to_date(mfg_date)
+    r = to_date(received_date)
+    e = to_date(expiry_date)
+
+    if r and r > today + timedelta(days=1):
+        raise HTTPException(status_code=400, detail="Receipt date cannot be in the future.")
+    if m and m > today + timedelta(days=1):
+        raise HTTPException(status_code=400, detail="Manufacturing/harvest date cannot be in the future.")
+    if m and r and m > r:
+        raise HTTPException(status_code=400, detail="Manufacturing date cannot be after receipt date.")
+    if e and m and e <= m:
+        raise HTTPException(status_code=400, detail="Expiry date must be strictly after manufacturing date.")
+    if e and r and e <= r:
+        raise HTTPException(status_code=400, detail="Expiry date must be strictly after receipt date.")
 import asyncio
 import secrets
 import hashlib
 import re
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, HTTPException, Query, status, Response, Header, Depends
+import os
+from fastapi import FastAPI, HTTPException, Query, status, Response, Header, Depends, Body
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import asyncpg
 
-from database import init_db_pool, close_db_pool, pool
+import database
+from database import init_db_pool, close_db_pool, get_pool
+
+class PoolProxy:
+    """Thread-safe dynamic proxy ensuring pool references are always up to date."""
+    def acquire(self, *args, **kwargs):
+        p = database.get_pool()
+        if not p:
+            raise RuntimeError("Database pool not initialized.")
+        return p.acquire(*args, **kwargs)
+
+    async def fetch(self, *args, **kwargs):
+        p = database.get_pool()
+        if not p:
+            raise RuntimeError("Database pool not initialized.")
+        return await p.fetch(*args, **kwargs)
+
+    async def fetchrow(self, *args, **kwargs):
+        p = database.get_pool()
+        if not p:
+            raise RuntimeError("Database pool not initialized.")
+        return await p.fetchrow(*args, **kwargs)
+
+    async def fetchval(self, *args, **kwargs):
+        p = database.get_pool()
+        if not p:
+            raise RuntimeError("Database pool not initialized.")
+        return await p.fetchval(*args, **kwargs)
+
+    async def execute(self, *args, **kwargs):
+        p = database.get_pool()
+        if not p:
+            raise RuntimeError("Database pool not initialized.")
+        return await p.execute(*args, **kwargs)
+
+pool = PoolProxy()
+
+class User(dict):
+    """Flexible User representation supporting both attribute dot-lookup and dictionary subscripting."""
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            return None
+    def __setattr__(self, name, value):
+        self[name] = value
 
 app = FastAPI(
     title="BhandarSetu Enterprise API",
@@ -20,11 +173,30 @@ app = FastAPI(
     version="2.0.0"
 )
 
+@app.get("/system/time")
+async def get_system_time():
+    """Returns server system clock and business timezone telemetry (Asia/Kolkata)."""
+    u_now = now_utc()
+    i_now = now_ist()
+    return {
+        "server_time_utc": u_now.isoformat(),
+        "business_timezone": "Asia/Kolkata",
+        "timezone_offset": "+05:30",
+        "server_time_ist": i_now.isoformat(),
+        "formatted_date_ist": i_now.strftime("%d-%m-%Y"),
+        "formatted_datetime_ist": i_now.strftime("%d-%m-%Y %I:%M %p"),
+        "is_live_clock": True
+    }
+
+
+allowed_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080")
+allowed_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -259,7 +431,7 @@ LOGIN_ATTEMPTS = {} # username_lower -> {"count": int, "locked_until": datetime,
 
 def check_login_rate_limit(username: str):
     u = username.strip().lower()
-    now = datetime.datetime.utcnow()
+    now = now_utc()
     record = LOGIN_ATTEMPTS.get(u)
     if record and record.get("locked_until") and record["locked_until"] > now:
         remaining_secs = int((record["locked_until"] - now).total_seconds())
@@ -271,7 +443,7 @@ def check_login_rate_limit(username: str):
 
 def record_login_failure(username: str):
     u = username.strip().lower()
-    now = datetime.datetime.utcnow()
+    now = now_utc()
     record = LOGIN_ATTEMPTS.setdefault(u, {"count": 0, "locked_until": None, "last_attempt": now})
     record["count"] += 1
     record["last_attempt"] = now
@@ -320,12 +492,28 @@ USER_CREDENTIALS = {
         "hash": _op_h,
         "salt": _op_s,
         "must_change_password": False
+    },
+    "rakesh.operator@bhandarsetu.gov.in": {
+        "hash": _op_h,
+        "salt": _op_s,
+        "must_change_password": False
+    },
+    "rakesh": {
+        "hash": _op_h,
+        "salt": _op_s,
+        "must_change_password": False
+    },
+    "emp_rakesh": {
+        "hash": _op_h,
+        "salt": _op_s,
+        "must_change_password": False
     }
 }
 
 ACTIVE_SESSIONS = {
     "BS-TOKEN-MANAGER-SECURE": {
         "id": "u0000004-0000-0000-0000-000000000004",
+        "alt_id": "u-manager-01",
         "username": "manager@bhandarsetu.gov.in",
         "full_name": "Aayush Tripathi",
         "role": "MANAGER",
@@ -341,8 +529,24 @@ ACTIVE_SESSIONS = {
             "CANCEL_DISPATCH", "STOCK_ADJUSTMENT"
         ]
     },
+    "BS-TOKEN-OPERATOR-RAKESH": {
+        "id": "u0000007-0000-0000-0000-000000000007",
+        "alt_id": "u-op-rakesh",
+        "username": "rakesh.operator@bhandarsetu.gov.in",
+        "full_name": "Rakesh Sharma",
+        "role": "WAREHOUSE_ADMIN",
+        "role_title": "Godown Operator / Warehouse Admin",
+        "warehouse_id": "11111111-1111-1111-1111-111111111111",
+        "warehouse_name": "Central Food Godown, Nagpur (Surajpur Depot)",
+        "is_active": True,
+        "must_change_password": False,
+        "permissions": [
+            "CREATE_INWARD", "VIEW_INVENTORY", "REQUEST_ALLOCATION", "PREPARE_DISPATCH", "UPDATE_DELIVERY"
+        ]
+    },
     "BS-TOKEN-OPERATOR-NGP": {
         "id": "u0000001-0000-0000-0000-000000000001",
+        "alt_id": "u-admin-ngp",
         "username": "admin.nagpur@bhandarsetu.gov.in",
         "full_name": "Ramesh Patil",
         "role": "WAREHOUSE_ADMIN",
@@ -357,6 +561,7 @@ ACTIVE_SESSIONS = {
     },
     "BS-TOKEN-OPERATOR-PUN": {
         "id": "u0000002-0000-0000-0000-000000000002",
+        "alt_id": "u-admin-pun",
         "username": "admin.pune@bhandarsetu.gov.in",
         "full_name": "Suresh Shinde",
         "role": "WAREHOUSE_ADMIN",
@@ -371,6 +576,7 @@ ACTIVE_SESSIONS = {
     },
     "BS-TOKEN-QUALITY-NGP": {
         "id": "u0000003-0000-0000-0000-000000000003",
+        "alt_id": "u-qo-01",
         "username": "quality@bhandarsetu.gov.in",
         "full_name": "Dr. Anita Rao",
         "role": "QUALITY_OFFICER",
@@ -401,7 +607,7 @@ IN_MEMORY_AUDIT_LOGS = [
     }
 ]
 
-def get_current_user_from_header(authorization: Optional[str] = Header(None)):
+def get_current_user_from_header(authorization: Optional[str] = Header(None)) -> User:
     if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -415,14 +621,13 @@ def get_current_user_from_header(authorization: Optional[str] = Header(None)):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account deactivated. Please contact your District Godown Manager."
             )
-        return user
-    if token.startswith("BS-AUTH-") or token.startswith("BS-TOKEN-"):
-        # Graceful token fallback for active dev tokens
-        return ACTIVE_SESSIONS["BS-TOKEN-MANAGER-SECURE"]
+        return User(user)
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired session token. Please log in."
     )
+
+get_current_user = get_current_user_from_header
 
 def require_manager_permission(user: dict = Depends(get_current_user_from_header)):
     if user.get("role") != "MANAGER" or "MANAGE_USERS" not in user.get("permissions", []):
@@ -512,23 +717,7 @@ async def auth_login(req: LoginRequest):
     # Successful login: reset failed attempts
     clear_login_failures(u_lower)
 
-    # Role-Selection Enforcement
-    actual_role = user_data["role"]
-    if req.selected_role:
-        if req.selected_role == "MANAGER" and actual_role != "MANAGER":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access Denied: This account is registered as a Warehouse Operator and does not have authorization to access the Manager / Supervisor portal. Please go back and select Warehouse Operator."
-            )
-        elif req.selected_role == "WAREHOUSE_ADMIN" and actual_role == "MANAGER":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access Denied: This account is registered as a District Manager. Please go back and select Manager / Supervisor to access your portal."
-            )
-
-    # Generate secure random token (32 bytes URL-safe)
-    token = f"BS-AUTH-{secrets.token_urlsafe(32)}"
-
+    # Initialize user_data first
     if user_record:
         user_data = user_record.copy()
     else:
@@ -553,6 +742,23 @@ async def auth_login(req: LoginRequest):
                 "CREATE_INWARD", "VIEW_INVENTORY", "REQUEST_ALLOCATION", "PREPARE_DISPATCH", "UPDATE_DELIVERY"
             ]
         }
+
+    # Role-Selection Enforcement
+    actual_role = user_data["role"]
+    if req.selected_role:
+        if req.selected_role == "MANAGER" and actual_role != "MANAGER":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access Denied: This account is registered as a Warehouse Operator and does not have authorization to access the Manager / Supervisor portal. Please go back and select Warehouse Operator."
+            )
+        elif req.selected_role == "WAREHOUSE_ADMIN" and actual_role == "MANAGER":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access Denied: This account is registered as a District Manager. Please go back and select Manager / Supervisor to access your portal."
+            )
+
+    # Generate secure random token (32 bytes URL-safe)
+    token = f"BS-AUTH-{secrets.token_urlsafe(32)}"
 
     user_data["must_change_password"] = cred.get("must_change_password", False) if cred else False
     ACTIVE_SESSIONS[token] = user_data
@@ -787,7 +993,7 @@ async def create_operator_user(req: UserCreateRequest, admin: dict = Depends(req
         "must_change_password": True,
         "permissions": perms,
         "last_login": "Never",
-        "created_at": datetime.datetime.utcnow().isoformat()
+        "created_at": now_utc_iso()
     }
 
     token = f"BS-AUTH-{new_id[:8]}"
@@ -1625,8 +1831,12 @@ async def receive_consignment_workflow(
             assigned_op = u
             break
 
+    # Validate chronological integrity
+    validate_chronological_sequence(received_date=workflow.arrival_date)
+
     receipt_voucher_id = f"RCV-{datetime.date.today().strftime('%Y%m')}-{uuid.uuid4().hex[:6].upper()}"
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    now_str = now_ist_str()
+    now_utc_str = now_utc_iso()
     created_batches = []
     created_tasks = []
 
@@ -1752,7 +1962,8 @@ async def receive_consignment_workflow(
         "received_by_id": user.get("id"),
         "received_by_name": user.get("full_name") or user.get("username"),
         "received_by_role": user.get("role"),
-        "received_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "received_at": now_utc_iso(),
+        "received_at_ist": now_ist_str(),
         "batches": created_batches,
         "tasks": [t["id"] for t in created_tasks],
         "batch_count": len(created_batches),
@@ -1812,6 +2023,9 @@ async def create_receipt(receipt_in: GoodsReceiptCreate, user: dict = Depends(ge
             batch_no = receipt_in.batch_no or f"BATCH-{receipt_no[3:]}"
             received_d = datetime.date.fromisoformat(receipt_in.received_date) if receipt_in.received_date else datetime.date.today()
             expiry_d = datetime.date.fromisoformat(receipt_in.expiry_date) if receipt_in.expiry_date else None
+
+            # Validate chronological sequencing
+            validate_chronological_sequence(received_date=received_d, expiry_date=expiry_d)
 
             await conn.execute("""
                 INSERT INTO batches (
@@ -2607,34 +2821,44 @@ async def initiate_batch_recall(rec: RecallCreate):
 # -----------------------------------------------------------------------------
 
 @app.post("/fifo-exceptions", status_code=status.HTTP_201_CREATED)
-async def create_fifo_exception(exc_in: FIFOExceptionCreate):
+async def create_fifo_exception(
+    exc_in: FIFOExceptionCreate,
+    user: dict = Depends(get_current_user_from_header)
+):
     async with pool.acquire() as conn:
         exc_id = str(uuid.uuid4())
+        requester_id = str(user.get("id") or exc_in.requested_by)
         await conn.execute("""
             INSERT INTO fifo_exceptions (
                 id, request_id, skipped_batch_id, chosen_batch_id,
                 reason_code, reason_text, requested_by, status
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING');
         """, exc_id, exc_in.request_id, exc_in.skipped_batch_id,
-             exc_in.chosen_batch_id, exc_in.reason_code, exc_in.reason_text, exc_in.requested_by)
+             exc_in.chosen_batch_id, exc_in.reason_code, exc_in.reason_text, requester_id)
         return {"success": True, "exception_id": exc_id, "status": "PENDING"}
 
 @app.post("/fifo-exceptions/{exception_id}/decide")
-async def decide_fifo_exception(exception_id: str, dec_in: FIFOExceptionDecide):
+async def decide_fifo_exception(
+    exception_id: str, 
+    dec_in: FIFOExceptionDecide,
+    user: dict = Depends(require_manager_permission)
+):
     async with pool.acquire() as conn:
         try:
             exc = await conn.fetchrow("SELECT requested_by FROM fifo_exceptions WHERE id = $1;", exception_id)
             if not exc:
                 raise HTTPException(status_code=404, detail="Exception not found.")
-            if str(exc["requested_by"]) == dec_in.approved_by:
+            
+            approver_id = str(user.get("id"))
+            if str(exc["requested_by"]) == approver_id:
                 raise HTTPException(status_code=422, detail="BS004: Maker-checker violation. Self-approval prohibited.")
 
             await conn.execute("""
                 UPDATE fifo_exceptions
                 SET status = $1, approved_by = $2, decided_at = CURRENT_TIMESTAMP
                 WHERE id = $3;
-            """, dec_in.decision, dec_in.approved_by, exception_id)
-            return {"success": True, "status": dec_in.decision}
+            """, dec_in.decision, approver_id, exception_id)
+            return {"success": True, "status": dec_in.decision, "approved_by": approver_id}
         except asyncpg.CheckViolationError:
             raise HTTPException(status_code=422, detail="BS004: Maker-checker rule breached.")
 
@@ -3429,16 +3653,18 @@ async def list_tasks(
     tasks = list(IN_MEMORY_TASKS)
     is_manager = current_user.get("role") == "MANAGER"
     user_id = current_user.get("id")
-    user_wh = current_user.get("warehouse_id")
 
-    # Strict RBAC filtering
+    # Strict RBAC task isolation
     if not is_manager:
-        # Operator sees only tasks explicitly assigned to them or within their assigned depot
-        tasks = [t for t in tasks if t["assigned_to_id"] == user_id or (user_wh and t["warehouse_id"] in (user_wh, "GDN-NGP-01" if "1111" in user_wh else "GDN-PUN-02"))]
+        # Operator sees strictly tasks assigned to their real user ID (or registered alias)
+        user_ids = {user_id}
+        if current_user.get("alt_id"):
+            user_ids.add(current_user["alt_id"])
+        tasks = [t for t in tasks if t.get("assigned_to_id") in user_ids]
     else:
         # Manager respects warehouse filter if specified
         if warehouse_id and warehouse_id != "ALL":
-            tasks = [t for t in tasks if t["warehouse_id"] == warehouse_id or warehouse_id in t["warehouse_id"]]
+            tasks = [t for t in tasks if t.get("warehouse_id") == warehouse_id or warehouse_id in t.get("warehouse_id", "")]
 
     if status and status != "ALL":
         tasks = [t for t in tasks if t["status"] == status]
@@ -3447,7 +3673,7 @@ async def list_tasks(
     if priority and priority != "ALL":
         tasks = [t for t in tasks if t["priority"] == priority]
     if batch_id and batch_id != "ALL":
-        tasks = [t for t in tasks if t["batch_id"].lower() == batch_id.lower()]
+        tasks = [t for t in tasks if str(t.get("batch_id", "")).lower() == batch_id.lower()]
 
     return tasks
 
@@ -3465,7 +3691,47 @@ async def create_task(
 
     enforce_warehouse_scope(current_user, req.warehouse_id)
 
-    task_id = f"TSK-2025-{Date_now_id()}"
+    # 1. Real Operator Lookup and Validation
+    if not req.assigned_to_id or not str(req.assigned_to_id).strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Validation Error: An active assigned Operator must be selected."
+        )
+
+    assigned_op = None
+    # Check in ACTIVE_SESSIONS
+    for s in ACTIVE_SESSIONS.values():
+        if s.get("id") == req.assigned_to_id or s.get("alt_id") == req.assigned_to_id or s.get("username") == req.assigned_to_id:
+            assigned_op = s
+            break
+
+    # Check in Postgres users table if available
+    if not assigned_op and pool:
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT id, username, full_name, role, warehouse_id, is_active FROM users WHERE id::text = $1 OR username = $1;", 
+                    req.assigned_to_id
+                )
+                if row:
+                    assigned_op = dict(row)
+        except Exception:
+            pass
+
+    if not assigned_op:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Validation Error: Selected operator '{req.assigned_to_id}' was not found in the official user registry."
+        )
+
+    if not assigned_op.get("is_active", True):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Validation Error: Operator '{assigned_op.get('full_name', req.assigned_to_id)}' is deactivated and cannot receive new tasks."
+        )
+
+    task_year = datetime.datetime.now(datetime.timezone.utc).year
+    task_id = f"TSK-{task_year}-{Date_now_id()}"
     new_task = {
         "id": task_id,
         "task_no": task_id,
@@ -3477,9 +3743,9 @@ async def create_task(
         "commodity": req.commodity,
         "warehouse_id": req.warehouse_id,
         "warehouse_name": "Central Food Godown, Nagpur (Surajpur Depot)" if "NGP" in req.warehouse_id or "1111" in req.warehouse_id else "District Buffer Depot, Pune",
-        "assigned_to_id": req.assigned_to_id,
-        "assigned_to_name": "Ramesh Patil" if "ngp" in req.assigned_to_id or "1111" in req.assigned_to_id else "Suresh Shinde",
-        "assigned_to_role": "WAREHOUSE_ADMIN",
+        "assigned_to_id": assigned_op.get("id"),
+        "assigned_to_name": assigned_op.get("full_name"),
+        "assigned_to_role": assigned_op.get("role", "WAREHOUSE_ADMIN"),
         "assigned_by_id": current_user["id"],
         "assigned_by_name": current_user["full_name"],
         "assigned_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M"),
@@ -3501,7 +3767,7 @@ async def create_task(
                 "actor_id": current_user["id"],
                 "actor_name": current_user["full_name"],
                 "actor_role": current_user["role"],
-                "comment": f"Task created and assigned by {current_user['full_name']}."
+                "comment": f"Task created and assigned to {assigned_op['full_name']} by Manager {current_user['full_name']}."
             }
         ]
     }
@@ -3509,7 +3775,7 @@ async def create_task(
 
     # In-App Notification to assigned Operator
     dispatch_notification(
-        user_id=req.assigned_to_id,
+        user_id=assigned_op.get("id"),
         target_role="WAREHOUSE_ADMIN",
         warehouse_id=req.warehouse_id,
         task_id=task_id,
@@ -3530,7 +3796,7 @@ async def create_task(
         "warehouse_id": req.warehouse_id,
         "warehouse_name": new_task["warehouse_name"],
         "target_ref": task_id,
-        "details": f"Created task {task_id}: {req.title} for Batch {req.batch_id}. Assigned to operator.",
+        "details": f"Created task {task_id}: {req.title} for Batch {req.batch_id}. Assigned to {assigned_op['full_name']}.",
         "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M"),
         "status": "SUCCESS"
     })
@@ -3547,7 +3813,10 @@ async def get_task_details(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task {task_id} not found.")
 
     if current_user.get("role") != "MANAGER":
-        if task["assigned_to_id"] != current_user["id"] and current_user.get("warehouse_id") not in (task["warehouse_id"], "GDN-NGP-01" if "1111" in str(current_user.get("warehouse_id")) else "GDN-PUN-02"):
+        user_ids = {current_user["id"]}
+        if current_user.get("alt_id"):
+            user_ids.add(current_user["alt_id"])
+        if task.get("assigned_to_id") not in user_ids:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied: You are not authorized to access tasks assigned to another operator."
@@ -3563,6 +3832,16 @@ async def update_task_status(
     task = next((t for t in IN_MEMORY_TASKS if t["id"] == task_id or t["task_no"] == task_id), None)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task {task_id} not found.")
+
+    if current_user.get("role") != "MANAGER":
+        user_ids = {current_user["id"]}
+        if current_user.get("alt_id"):
+            user_ids.add(current_user["alt_id"])
+        if task.get("assigned_to_id") not in user_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You cannot modify tasks assigned to another operator."
+            )
 
     action = req.action.upper()
     now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M")
@@ -4827,6 +5106,16 @@ async def confirm_physical_putaway(
         raise HTTPException(status_code=400, detail="This put-away task has already been fully confirmed and completed.")
 
     enforce_warehouse_scope(user, task.get("warehouse_id"))
+
+    if user.get("role") != "MANAGER":
+        user_ids = {user["id"]}
+        if user.get("alt_id"):
+            user_ids.add(user["alt_id"])
+        if task.get("assigned_to_id") not in user_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You cannot confirm physical placement for another operator's task."
+            )
 
     # Validate quantities
     if req.actual_quantity <= 0:

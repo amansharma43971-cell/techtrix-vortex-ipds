@@ -55,7 +55,159 @@ var navigator = { userAgent: 'test' };
 
 
     // Exact seed data matching the screenshot
-    const DEMO_TODAY = '2025-10-23';
+    // =========================================================================
+    // BUSINESS TIMEZONE & REAL-TIME SYSTEM CLOCK (Asia/Kolkata, IST UTC+05:30)
+    // =========================================================================
+    const APP_TIMEZONE = 'Asia/Kolkata';
+
+    function getNowIST() {
+      return new Date();
+    }
+
+    // Relative date helper for demo scenarios: dynamically offset from real current date
+    function getRelativeDateDMY(daysAgo) {
+      const d = new Date();
+      d.setDate(d.getDate() - daysAgo);
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${day}-${month}-${year}`;
+    }
+
+    // Date parsing: handles DD-MM-YYYY, YYYY-MM-DD, and ISO strings without day boundary slip
+    function parseDateDMY(str) {
+      if (!str) return new Date();
+      if (str instanceof Date) return str;
+      if (typeof str === 'string') {
+        if (str.includes('T')) {
+          const p = new Date(str);
+          if (!isNaN(p.getTime())) return p;
+        }
+        const clean = str.split(' ')[0];
+        const parts = clean.split(/[-\/]/);
+        if (parts.length === 3) {
+          let y, m, d;
+          if (parts[0].length === 4) {
+            y = parseInt(parts[0], 10);
+            m = parseInt(parts[1], 10) - 1;
+            d = parseInt(parts[2], 10);
+          } else {
+            d = parseInt(parts[0], 10);
+            m = parseInt(parts[1], 10) - 1;
+            y = parseInt(parts[2], 10);
+          }
+          if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+            return new Date(y, m, d, 12, 0, 0); // Noon anchor prevents day boundary shifts
+          }
+        }
+        const fallback = new Date(str);
+        if (!isNaN(fallback.getTime())) return fallback;
+      }
+      return new Date();
+    }
+
+    // Format Date/ISO to DD-MM-YYYY in Asia/Kolkata
+    function formatDateIST(dateInput) {
+      if (!dateInput) return '—';
+      const d = dateInput instanceof Date ? dateInput : (typeof dateInput === 'string' && dateInput.includes('T') ? new Date(dateInput) : parseDateDMY(dateInput));
+      if (isNaN(d.getTime())) return '—';
+      const f = new Intl.DateTimeFormat('en-IN', {
+        timeZone: APP_TIMEZONE,
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+      return f.format(d).replace(/\//g, '-');
+    }
+
+    // Format Date/ISO to 12-hour format with AM/PM in Asia/Kolkata
+    function formatTimeIST(dateInput) {
+      if (!dateInput) return '—';
+      const d = dateInput instanceof Date ? dateInput : (typeof dateInput === 'string' && dateInput.includes('T') ? new Date(dateInput) : parseDateDMY(dateInput));
+      if (isNaN(d.getTime())) return '—';
+      const f = new Intl.DateTimeFormat('en-IN', {
+        timeZone: APP_TIMEZONE,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+      return f.format(d);
+    }
+
+    // Format Date/ISO to DD-MM-YYYY hh:mm AM/PM in Asia/Kolkata
+    function formatDateTimeIST(dateInput) {
+      if (!dateInput) return '—';
+      return formatDateIST(dateInput) + ' ' + formatTimeIST(dateInput);
+    }
+
+    // Current live IST date in DD-MM-YYYY format
+    function getTodayDateDMY() {
+      return formatDateIST(new Date());
+    }
+
+    // Current live IST date in YYYY-MM-DD format (for HTML date pickers)
+    function getTodayDateYMD() {
+      const now = new Date();
+      return new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE }).format(now);
+    }
+
+    // Current live IST time in HH:mm 24-hr format (for HTML time pickers)
+    function getCurrentTime24() {
+      const now = new Date();
+      return new Intl.DateTimeFormat('en-GB', {
+        timeZone: APP_TIMEZONE,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).format(now);
+    }
+
+    // Generate UTC ISO string for backend / database storage
+    function getNowUTCISO() {
+      return new Date().toISOString();
+    }
+
+    // Calculate shelf life age in days dynamically against the live system clock
+    function calcAge(arrivalDateStr) {
+      if (!arrivalDateStr) return 0;
+      const arr = parseDateDMY(arrivalDateStr);
+      const now = new Date();
+      const diff = now.getTime() - arr.getTime();
+      return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
+    }
+
+    function calculateAgeDaysHtml(dateStr) {
+      return calcAge(dateStr);
+    }
+
+    // Chronological date validation rule: validates sequence and rejects impossible dates
+    function validateDateSequence({ manufacturingDate, receiptDate, expiryDate, dueDate }) {
+      const mfg = manufacturingDate ? parseDateDMY(manufacturingDate) : null;
+      const rcv = receiptDate ? parseDateDMY(receiptDate) : null;
+      const exp = expiryDate ? parseDateDMY(expiryDate) : null;
+      const due = dueDate ? parseDateDMY(dueDate) : null;
+      const now = new Date();
+
+      if (rcv && rcv.getTime() > now.getTime() + 86400000) {
+        return { valid: false, message: 'Receipt date cannot be in the future.' };
+      }
+      if (mfg && mfg.getTime() > now.getTime() + 86400000) {
+        return { valid: false, message: 'Manufacturing/Harvest date cannot be in the future.' };
+      }
+      if (mfg && rcv && mfg.getTime() > rcv.getTime()) {
+        return { valid: false, message: 'Manufacturing date cannot be later than Arrival date.' };
+      }
+      if (exp && mfg && exp.getTime() <= mfg.getTime()) {
+        return { valid: false, message: 'Expiry date must be strictly after Manufacturing date.' };
+      }
+      if (exp && rcv && exp.getTime() <= rcv.getTime()) {
+        return { valid: false, message: 'Expiry date must be strictly after Arrival date.' };
+      }
+      if (due && due.getTime() < now.getTime() - 3600000) {
+        return { valid: false, message: 'Task Due Date cannot be in the past.' };
+      }
+      return { valid: true };
+    }
 
     let appState = {
       activeRoute: 'dashboard',
@@ -356,7 +508,7 @@ var navigator = { userAgent: 'test' };
             },
             {
               batchId: 'B002',
-              arrivalDate: '10-01-2025',
+              arrivalDate: getRelativeDateDMY(150), isDemo: true, demoTag: 'SEEDED_AGEING_DEMO',
               qualityStatus: 'Eligible',
               availableBeforeBags: 150,
               allocatedBags: 20,
@@ -382,7 +534,7 @@ var navigator = { userAgent: 'test' };
           allocatedBatches: [
             {
               batchId: 'B002',
-              arrivalDate: '10-01-2025',
+              arrivalDate: getRelativeDateDMY(150), isDemo: true, demoTag: 'SEEDED_AGEING_DEMO',
               qualityStatus: 'Eligible',
               availableBeforeBags: 130,
               allocatedBags: 100,
@@ -434,7 +586,7 @@ var navigator = { userAgent: 'test' };
           allocatedBatches: [
             {
               batchId: 'B006',
-              arrivalDate: '01-03-2025',
+              arrivalDate: getRelativeDateDMY(45), isDemo: true, demoTag: 'SEEDED_NORMAL_DEMO',
               qualityStatus: 'Eligible',
               availableBeforeBags: 80,
               allocatedBags: 50,
@@ -595,37 +747,7 @@ var navigator = { userAgent: 'test' };
       selectedBatchForAllocation: null,
 
       // Multi-Step Warehouse, Batch & Storage Allocation Workflow State
-      receiveWorkflow: {
-        currentStep: 1, // 1: Consignment, 2: Warehouse, 3: Allocation, 4: Review & Confirm
-        consignmentId: 'CSG-2025-0042',
-        supplierName: 'FCI Depot Karnal (Central Pool)',
-        challanNumber: 'CHL-INW-0042',
-        arrivalDate: '2025-10-24',
-        arrivalTime: '10:30',
-        commodity: 'Wheat',
-        totalQuantity: 200,
-        unit: 'Bags (50kg)',
-        vehicleNumber: 'UP-16-BT-4412',
-        remarks: 'Gate weighbridge sound verification, bag seals intact.',
-        documentName: 'Challan_Gate_Weighment_Slip.pdf',
-        destinationWarehouseId: 'GDN-NGP-01',
-        allocationMode: 'MANUAL', // 'MANUAL' or 'AUTO_SLOT'
-        allocations: [
-          {
-            batchId: 'B011',
-            commodity: 'Wheat',
-            quantity: 200,
-            warehouseId: 'GDN-NGP-01',
-            zoneCode: 'ZONE-B',
-            rack: '02',
-            binCode: 'BAY-A-RACK-02-BIN-02',
-            receiptDate: '2025-10-24',
-            qualityStatus: 'Pending Inspection'
-          }
-        ],
-        isSubmitting: false,
-        lastSubmittedConsignmentId: null
-      },
+      receiveWorkflow: null,
 
       // Configured Warehouses Master List
       warehouses: [
@@ -786,15 +908,15 @@ var navigator = { userAgent: 'test' };
 
       batches: [
         { id: 'B001', commodity: 'Wheat', arrivalDate: '01-01-2025', totalQuantity: 100, availableQuantity: 100, qualityStatus: 'Eligible', supplier: 'FCI Depot Karnal', binCode: 'BAY-A-RACK-01-BIN-01', warehouseId: 'GDN-NGP-01', allocatedBy: 'Inspector R. Sharma', allocatedAt: '2025-01-01 10:30', notes: 'Moisture 10.4%, grain luster clear' },
-        { id: 'B002', commodity: 'Wheat', arrivalDate: '10-01-2025', totalQuantity: 150, availableQuantity: 150, qualityStatus: 'Eligible', supplier: 'Punjab Agro Pool', binCode: 'BAY-A-RACK-01-BIN-01', warehouseId: 'GDN-NGP-01', allocatedBy: 'Inspector R. Sharma', allocatedAt: '2025-01-10 11:15', notes: 'Sona Moti Grade A' },
-        { id: 'B003', commodity: 'Wheat', arrivalDate: '20-01-2025', totalQuantity: 200, availableQuantity: 200, qualityStatus: 'Eligible', supplier: 'Haryana Agro Pool', binCode: 'BAY-A-RACK-01-BIN-02', warehouseId: 'GDN-NGP-01', allocatedBy: 'A. Tripathi', allocatedAt: '2025-01-20 14:00', notes: 'Moisture 11.2%' },
+        { id: 'B002', commodity: 'Wheat', arrivalDate: getRelativeDateDMY(150), isDemo: true, demoTag: 'SEEDED_AGEING_DEMO', totalQuantity: 150, availableQuantity: 150, qualityStatus: 'Eligible', supplier: 'Punjab Agro Pool', binCode: 'BAY-A-RACK-01-BIN-01', warehouseId: 'GDN-NGP-01', allocatedBy: 'Inspector R. Sharma', allocatedAt: '2025-01-10 11:15', notes: 'Sona Moti Grade A' },
+        { id: 'B003', commodity: 'Wheat', arrivalDate: getRelativeDateDMY(75), isDemo: true, demoTag: 'SEEDED_NORMAL_DEMO', totalQuantity: 200, availableQuantity: 200, qualityStatus: 'Eligible', supplier: 'Haryana Agro Pool', binCode: 'BAY-A-RACK-01-BIN-02', warehouseId: 'GDN-NGP-01', allocatedBy: 'A. Tripathi', allocatedAt: '2025-01-20 14:00', notes: 'Moisture 11.2%' },
         { id: 'B004', commodity: 'Rice', damagedQuantity: 25,  arrivalDate: '05-02-2025', totalQuantity: 120, availableQuantity: 120, qualityStatus: 'Hold', supplier: 'Chhattisgarh State Pool', binCode: 'BAY-B-RACK-01-BIN-02', warehouseId: 'GDN-NGP-01', allocatedBy: 'Inspector R. Sharma', allocatedAt: '2025-02-05 09:45', holdReason: 'Moisture content exceeds 14%, pending aeration' },
         { id: 'B005', commodity: 'Rice',  arrivalDate: '15-02-2025', totalQuantity: 180, availableQuantity: 180, qualityStatus: 'Eligible', supplier: 'Andhra Millers Co-op', binCode: 'BAY-B-RACK-01-BIN-01', warehouseId: 'GDN-NGP-01', allocatedBy: 'Inspector R. Sharma', allocatedAt: '2025-02-15 13:20', notes: 'Common Raw Grade I' },
         { id: 'B006', commodity: 'Wheat', arrivalDate: '28-02-2025', totalQuantity: 160, availableQuantity: 160, qualityStatus: 'Eligible', supplier: 'MP State Supplies', binCode: 'BAY-A-RACK-02-BIN-01', warehouseId: 'GDN-NGP-01', allocatedBy: 'A. Tripathi', allocatedAt: '2025-02-28 16:30', notes: 'Fresh harvest arrival' },
         { id: 'B007', commodity: 'Wheat', arrivalDate: '10-03-2025', totalQuantity: 140, availableQuantity: 140, qualityStatus: 'Rejected', supplier: 'UP Agro Corporation', binCode: 'QUAR-01-BIN-01', warehouseId: 'GDN-NGP-01', allocatedBy: 'Quality Officer Verma', allocatedAt: '2025-03-10 11:00', holdReason: 'Weevil infestation detected by lab inspection' },
-        { id: 'B008', commodity: 'Wheat', arrivalDate: '24-10-2025', totalQuantity: 200, availableQuantity: 200, qualityStatus: 'Pending Allocation', supplier: 'FCI Depot Karnal', binCode: null, warehouseId: 'GDN-NGP-01', notes: 'New harvest intake consignment - awaiting godown bin assignment' },
-        { id: 'B009', commodity: 'Wheat', arrivalDate: '15-03-2025', totalQuantity: 180, availableQuantity: 180, qualityStatus: 'Eligible', supplier: 'Maharashtra Agro Pune', binCode: 'BAY-PUN-01-BIN-01', warehouseId: 'GDN-PUN-02', allocatedBy: 'Suresh Shinde', allocatedAt: '2025-03-15 10:00', notes: 'Pune Buffer Depot sound intake' },
-        { id: 'B010', commodity: 'Rice', damagedQuantity: 10,  arrivalDate: '25-03-2025', totalQuantity: 220, availableQuantity: 220, qualityStatus: 'Eligible', supplier: 'Solapur Millers Co-op', binCode: 'BAY-PUN-01-BIN-02', warehouseId: 'GDN-PUN-02', allocatedBy: 'Suresh Shinde', allocatedAt: '2025-03-25 11:30', notes: 'Grade A Sona Masuri' }
+        { id: 'B008', commodity: 'Wheat', arrivalDate: getRelativeDateDMY(1), isDemo: true, demoTag: 'SEEDED_INTAKE_DEMO', totalQuantity: 200, availableQuantity: 200, qualityStatus: 'Pending Allocation', supplier: 'FCI Depot Karnal', binCode: null, warehouseId: 'GDN-NGP-01', notes: 'New harvest intake consignment - awaiting godown bin assignment' },
+        { id: 'B009', commodity: 'Wheat', arrivalDate: getRelativeDateDMY(20), isDemo: true, demoTag: 'SEEDED_FRESH_DEMO', totalQuantity: 180, availableQuantity: 180, qualityStatus: 'Eligible', supplier: 'Maharashtra Agro Pune', binCode: 'BAY-PUN-01-BIN-01', warehouseId: 'GDN-PUN-02', allocatedBy: 'Suresh Shinde', allocatedAt: '2025-03-15 10:00', notes: 'Pune Buffer Depot sound intake' },
+        { id: 'B010', commodity: 'Rice', damagedQuantity: 10,  arrivalDate: getRelativeDateDMY(95), isDemo: true, demoTag: 'SEEDED_BUFFER_DEMO', totalQuantity: 220, availableQuantity: 220, qualityStatus: 'Eligible', supplier: 'Solapur Millers Co-op', binCode: 'BAY-PUN-01-BIN-02', warehouseId: 'GDN-PUN-02', allocatedBy: 'Suresh Shinde', allocatedAt: '2025-03-25 11:30', notes: 'Grade A Sona Masuri' }
       ],
 
       bins: [
@@ -853,7 +975,7 @@ var navigator = { userAgent: 'test' };
             },
             {
               batchId: 'B002',
-              arrivalDate: '10-01-2025',
+              arrivalDate: getRelativeDateDMY(150), isDemo: true, demoTag: 'SEEDED_AGEING_DEMO',
               allocatedBags: 20,
               actualLoadedBags: 20,
               qualityStatus: 'Eligible',
@@ -899,7 +1021,7 @@ var navigator = { userAgent: 'test' };
           batchLines: [
             {
               batchId: 'B002',
-              arrivalDate: '10-01-2025',
+              arrivalDate: getRelativeDateDMY(150), isDemo: true, demoTag: 'SEEDED_AGEING_DEMO',
               allocatedBags: 100,
               actualLoadedBags: 100,
               qualityStatus: 'Eligible',
@@ -982,7 +1104,7 @@ var navigator = { userAgent: 'test' };
           batchLines: [
             {
               batchId: 'B006',
-              arrivalDate: '01-03-2025',
+              arrivalDate: getRelativeDateDMY(45), isDemo: true, demoTag: 'SEEDED_NORMAL_DEMO',
               allocatedBags: 50,
               actualLoadedBags: 50,
               qualityStatus: 'Eligible',
@@ -1020,7 +1142,7 @@ var navigator = { userAgent: 'test' };
           batchLines: [
             {
               batchId: 'B003',
-              arrivalDate: '20-01-2025',
+              arrivalDate: getRelativeDateDMY(75), isDemo: true, demoTag: 'SEEDED_NORMAL_DEMO',
               allocatedBags: 80,
               actualLoadedBags: 80,
               qualityStatus: 'Eligible',
@@ -1588,6 +1710,39 @@ var navigator = { userAgent: 'test' };
       ]
     };
 
+    // Safe Data Sanitizer to prevent any null/undefined exceptions
+    function sanitizeAppState() {
+      const arrayKeys = [
+        'batches', 'dispatches', 'alerts', 'bins', 'stockMovements', 
+        'inspections', 'users', 'auditLogs', 'tasks', 'notifications', 
+        'consignments', 'warehouses', 'allocationRequests',
+        'damagedStock', 'clearanceOrders', 'stockTransfers', 
+        'stockVerifications', 'disposalRequests'
+      ];
+      arrayKeys.forEach(k => {
+        if (!Array.isArray(appState[k])) {
+          appState[k] = [];
+        } else {
+          appState[k] = appState[k].filter(item => item !== null && item !== undefined);
+        }
+      });
+      if (!appState.currentUser || typeof appState.currentUser !== 'object' || !appState.currentUser.role) {
+        appState.currentUser = {
+          id: 'u-manager-01',
+          username: 'manager@bhandarsetu.gov.in',
+          fullName: 'Aayush Tripathi',
+          role: 'MANAGER',
+          roleTitle: 'District Godown Manager / Supervisor',
+          warehouseId: null,
+          warehouseName: 'All Warehouses (National Central Depot)',
+          email: 'manager@bhandarsetu.gov.in',
+          isActive: true,
+          permissions: ['VIEW_SYSTEM_DATA', 'MANAGE_USERS', 'APPROVE_EXCEPTIONS', 'VIEW_ANALYTICS', 'VIEW_AUDIT_LOGS', 'CREATE_INWARD', 'VIEW_INVENTORY', 'REQUEST_ALLOCATION', 'PREPARE_DISPATCH', 'UPDATE_DELIVERY', 'APPROVE_QUALITY', 'OVERRIDE_HOLD_BATCH', 'CANCEL_DISPATCH']
+        };
+      }
+      appState.isAuthenticated = true;
+    }
+
     // Load from localStorage if present
     try {
       const saved = localStorage.getItem('bhandarsetu_html_state');
@@ -1599,13 +1754,13 @@ var navigator = { userAgent: 'test' };
             warehouseId: b.warehouseId || (b.id === 'B009' || b.id === 'B010' ? 'GDN-PUN-02' : 'GDN-NGP-01')
           }));
           if (!appState.batches.some(b => b.id === 'B008')) {
-            appState.batches.push({ id: 'B008', commodity: 'Wheat', arrivalDate: '24-10-2025', totalQuantity: 200, availableQuantity: 200, qualityStatus: 'Pending Allocation', supplier: 'FCI Depot Karnal', binCode: null, warehouseId: 'GDN-NGP-01', notes: 'New harvest intake consignment - awaiting godown bin assignment' });
+            appState.batches.push({ id: 'B008', commodity: 'Wheat', arrivalDate: getRelativeDateDMY(1), isDemo: true, demoTag: 'SEEDED_INTAKE_DEMO', totalQuantity: 200, availableQuantity: 200, qualityStatus: 'Pending Allocation', supplier: 'FCI Depot Karnal', binCode: null, warehouseId: 'GDN-NGP-01', notes: 'New harvest intake consignment - awaiting godown bin assignment' });
           }
           if (!appState.batches.some(b => b.id === 'B009')) {
-            appState.batches.push({ id: 'B009', commodity: 'Wheat', arrivalDate: '15-03-2025', totalQuantity: 180, availableQuantity: 180, qualityStatus: 'Eligible', supplier: 'Maharashtra Agro Pune', binCode: 'BAY-PUN-01-BIN-01', warehouseId: 'GDN-PUN-02', allocatedBy: 'Suresh Shinde', allocatedAt: '2025-03-15 10:00', notes: 'Pune Buffer Depot sound intake' });
+            appState.batches.push({ id: 'B009', commodity: 'Wheat', arrivalDate: getRelativeDateDMY(20), isDemo: true, demoTag: 'SEEDED_FRESH_DEMO', totalQuantity: 180, availableQuantity: 180, qualityStatus: 'Eligible', supplier: 'Maharashtra Agro Pune', binCode: 'BAY-PUN-01-BIN-01', warehouseId: 'GDN-PUN-02', allocatedBy: 'Suresh Shinde', allocatedAt: '2025-03-15 10:00', notes: 'Pune Buffer Depot sound intake' });
           }
           if (!appState.batches.some(b => b.id === 'B010')) {
-            appState.batches.push({ id: 'B010', commodity: 'Rice', damagedQuantity: 10, arrivalDate: '25-03-2025', totalQuantity: 220, availableQuantity: 220, qualityStatus: 'Eligible', supplier: 'Solapur Millers Co-op', binCode: 'BAY-PUN-01-BIN-02', warehouseId: 'GDN-PUN-02', allocatedBy: 'Suresh Shinde', allocatedAt: '2025-03-25 11:30', notes: 'Grade A Sona Masuri' });
+            appState.batches.push({ id: 'B010', commodity: 'Rice', damagedQuantity: 10, arrivalDate: getRelativeDateDMY(95), isDemo: true, demoTag: 'SEEDED_BUFFER_DEMO', totalQuantity: 220, availableQuantity: 220, qualityStatus: 'Eligible', supplier: 'Solapur Millers Co-op', binCode: 'BAY-PUN-01-BIN-02', warehouseId: 'GDN-PUN-02', allocatedBy: 'Suresh Shinde', allocatedAt: '2025-03-25 11:30', notes: 'Grade A Sona Masuri' });
           }
         }
         if (parsed.dispatches && parsed.dispatches.length > 0) {
@@ -1633,6 +1788,11 @@ var navigator = { userAgent: 'test' };
         if (parsed.notifications && parsed.notifications.length > 0) appState.notifications = parsed.notifications;
         if (parsed.consignments && parsed.consignments.length > 0) appState.consignments = parsed.consignments;
         if (parsed.warehouses && parsed.warehouses.length > 0) appState.warehouses = parsed.warehouses;
+        if (parsed.damagedStock && Array.isArray(parsed.damagedStock)) appState.damagedStock = parsed.damagedStock;
+        if (parsed.clearanceOrders && Array.isArray(parsed.clearanceOrders)) appState.clearanceOrders = parsed.clearanceOrders;
+        if (parsed.stockTransfers && Array.isArray(parsed.stockTransfers)) appState.stockTransfers = parsed.stockTransfers;
+        if (parsed.stockVerifications && Array.isArray(parsed.stockVerifications)) appState.stockVerifications = parsed.stockVerifications;
+        if (parsed.disposalRequests && Array.isArray(parsed.disposalRequests)) appState.disposalRequests = parsed.disposalRequests;
         if (parsed.currentUser && parsed.currentUser.role) {
           appState.currentUser = parsed.currentUser;
           appState.isAuthenticated = parsed.isAuthenticated !== undefined ? parsed.isAuthenticated : true;
@@ -1640,7 +1800,10 @@ var navigator = { userAgent: 'test' };
           appState.selectedWarehouseScope = parsed.selectedWarehouseScope || 'ALL';
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('localStorage parse exception, resetting to defaults:', e);
+    }
+    sanitizeAppState();
 
     function saveState() {
       try {
@@ -1661,7 +1824,12 @@ var navigator = { userAgent: 'test' };
           inspections: appState.inspections,
           allocationRequests: appState.allocationRequests,
           consignments: appState.consignments,
-          warehouses: appState.warehouses
+          warehouses: appState.warehouses,
+          damagedStock: appState.damagedStock,
+          clearanceOrders: appState.clearanceOrders,
+          stockTransfers: appState.stockTransfers,
+          stockVerifications: appState.stockVerifications,
+          disposalRequests: appState.disposalRequests
         }));
       } catch (e) {}
     }
@@ -1692,12 +1860,8 @@ var navigator = { userAgent: 'test' };
       }
     }
 
-    function calcAge(arrivalDateStr) {
-      const arr = parseDateDMY(arrivalDateStr);
-      const ref = new Date(2025, 9, 23); // 23 Oct 2025
-      const diff = ref.getTime() - arr.getTime();
-      return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
-    }
+    // Live dynamic age computation
+    // Handled by core module calcAge(arrivalDateStr) above
 
     // =========================================================================
     // CRYPTOGRAPHIC SECURITY (PBKDF2-HMAC-SHA256, 100,000 ROUNDS) & RBAC POLICIES
@@ -1883,7 +2047,7 @@ var navigator = { userAgent: 'test' };
       const user = appState.currentUser;
       const role = user ? user.role : 'MANAGER';
       const isManager = role === 'MANAGER';
-      const unreadAlerts = (appState.alerts || []).filter(a => !a.isRead).length;
+      const unreadAlerts = (Array.isArray(appState.alerts) ? appState.alerts : []).filter(a => a && !a.isRead).length;
 
       const groups = [
         {
@@ -1929,7 +2093,7 @@ var navigator = { userAgent: 'test' };
               id: 'manager-tasks',
               label: 'Task Follow-up',
               icon: '<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>',
-              badge: (appState.tasks || []).filter(t => t.status === 'SUBMITTED_FOR_REVIEW' || t.isOverdue || t.status === 'BLOCKED').length
+              badge: (Array.isArray(appState.tasks) ? appState.tasks : []).filter(t => t && (t.status === 'SUBMITTED_FOR_REVIEW' || t.isOverdue || t.status === 'BLOCKED')).length
             },
             {
               id: 'fifo',
@@ -1956,7 +2120,7 @@ var navigator = { userAgent: 'test' };
               id: 'operator-tasks',
               label: 'My Tasks',
               icon: '<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>',
-              badge: (appState.tasks || []).filter(t => (t.assignedToId === (user ? user.id : '') || t.assignedToName === (user ? user.fullName : '')) && t.status !== 'COMPLETED' && t.status !== 'CANCELLED').length
+              badge: (Array.isArray(appState.tasks) ? appState.tasks : []).filter(t => t && (t.assignedToId === (user ? user.id : '') || t.assignedToName === (user ? user.fullName : '')) && t.status !== 'COMPLETED' && t.status !== 'CANCELLED').length
             },
             {
               id: 'fifo',
@@ -1987,31 +2151,31 @@ var navigator = { userAgent: 'test' };
               id: 'damaged-stock',
               label: 'Damaged & Held Stock',
               icon: '<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>',
-              badge: (appState.damagedStock || []).filter(d => d.status === 'ON_HOLD' || d.status === 'REPORTED').length
+              badge: (Array.isArray(appState.damagedStock) ? appState.damagedStock : []).filter(d => d && (d.status === 'ON_HOLD' || d.status === 'REPORTED')).length
             },
             {
               id: 'clearance-orders',
               label: 'Clearance Orders',
               icon: '<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg>',
-              badge: (appState.clearanceOrders || []).filter(c => c.status === 'ASSIGNED' || c.status === 'IN_PROGRESS').length
+              badge: (Array.isArray(appState.clearanceOrders) ? appState.clearanceOrders : []).filter(c => c && (c.status === 'ASSIGNED' || c.status === 'IN_PROGRESS')).length
             },
             {
               id: 'stock-transfers',
               label: 'Stock Transfer',
               icon: '<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>',
-              badge: (appState.stockTransfers || []).filter(t => t.status === 'IN_TRANSIT').length
+              badge: (Array.isArray(appState.stockTransfers) ? appState.stockTransfers : []).filter(t => t && t.status === 'IN_TRANSIT').length
             },
             {
               id: 'stock-verification',
               label: 'Stock Verification',
               icon: '<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>',
-              badge: (appState.stockVerifications || []).filter(v => v.status === 'DISCREPANCY_DETECTED').length
+              badge: (Array.isArray(appState.stockVerifications) ? appState.stockVerifications : []).filter(v => v && v.status === 'DISCREPANCY_DETECTED').length
             },
             {
               id: 'disposal-approvals',
               label: 'Disposal & Write-off',
               icon: '<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>',
-              badge: (appState.disposalRequests || []).filter(d => d.status === 'REQUESTED' || d.status === 'UNDER_REVIEW').length
+              badge: (Array.isArray(appState.disposalRequests) ? appState.disposalRequests : []).filter(d => d && (d.status === 'REQUESTED' || d.status === 'UNDER_REVIEW')).length
             }
           ]
         }
@@ -2061,10 +2225,11 @@ var navigator = { userAgent: 'test' };
     function renderSidebar() {
       const container = document.getElementById('navList');
       if (!container) return;
-      const groups = getRoleNavGroups();
-      const isCollapsed = appState.sidebarCollapsed;
+      try {
+        const groups = getRoleNavGroups() || [];
+        const isCollapsed = appState.sidebarCollapsed;
 
-      container.innerHTML = groups.map((group, gIdx) => {
+        container.innerHTML = groups.map((group, gIdx) => {
         const headerHtml = isCollapsed
           ? (gIdx > 0 ? '<div class="my-2 border-t border-white/10 mx-1"></div>' : '')
           : `<div class="text-[10px] font-bold text-blue-200/60 uppercase tracking-wider px-3 pt-3 pb-1">${group.title}</div>`;
@@ -2090,6 +2255,26 @@ var navigator = { userAgent: 'test' };
 
         return headerHtml + itemsHtml;
       }).join('');
+      } catch (err) {
+        console.error('renderSidebar exception caught:', err);
+        container.innerHTML = `
+          <div class="p-2 space-y-1">
+            <button onclick="setRoute('dashboard')" class="w-full h-10 px-3 rounded-lg flex items-center gap-3 bg-[#1E63C4] text-white text-xs font-semibold">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+              <span>Dashboard</span>
+            </button>
+            <button onclick="setRoute('allocation')" class="w-full h-10 px-3 rounded-lg flex items-center gap-3 text-blue-100 hover:bg-white/10 text-xs font-medium">
+              <span>📥</span><span>Receive Stock</span>
+            </button>
+            <button onclick="setRoute('inventory')" class="w-full h-10 px-3 rounded-lg flex items-center gap-3 text-blue-100 hover:bg-white/10 text-xs font-medium">
+              <span>📦</span><span>Inventory & Batches</span>
+            </button>
+            <button onclick="setRoute('fifo')" class="w-full h-10 px-3 rounded-lg flex items-center gap-3 text-blue-100 hover:bg-white/10 text-xs font-medium">
+              <span>⚡</span><span>FIFO Allocation</span>
+            </button>
+          </div>
+        `;
+      }
     }
 
     const routeMetaMap = {
@@ -2341,7 +2526,9 @@ var navigator = { userAgent: 'test' };
     function renderCurrentRoute() {
       const container = document.getElementById('mainContainer');
       if (!container) return;
-      window.scrollTo(0, 0);
+      if (typeof window.scrollTo === 'function') {
+        try { window.scrollTo(0, 0); } catch (e) {}
+      }
 
       // Smooth Page-Transition Animation on mainContainer only
       container.classList.remove('animate-pageTransition');
@@ -2570,7 +2757,7 @@ var navigator = { userAgent: 'test' };
                   <button onclick="setRoute('manager-tasks')" class="px-3.5 py-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer whitespace-nowrap">
                     <span>📋 Task Follow-up</span>
                   </button>
-                  <button onclick="setRoute('allocation')" class="px-3.5 py-2 rounded-xl bg-[#0B4DA8] hover:bg-[#0A2F6B] text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer whitespace-nowrap">
+                  <button onclick="startNewConsignmentIntake()" class="px-3.5 py-2 rounded-xl bg-[#0B4DA8] hover:bg-[#0A2F6B] text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer whitespace-nowrap">
                     <span>+ Receive Stock</span>
                   </button>
                   <button onclick="setRoute('inventory')" class="px-3.5 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer whitespace-nowrap">
@@ -2678,7 +2865,7 @@ var navigator = { userAgent: 'test' };
 
           <!-- 3. MANAGER QUICK ACTIONS RIBBON -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <button onclick="setRoute('allocation')" class="p-3.5 rounded-xl border border-slate-200 bg-white hover:border-blue-400 hover:shadow-xs transition-all text-left flex items-center gap-3 cursor-pointer group">
+            <button onclick="startNewConsignmentIntake()" class="p-3.5 rounded-xl border border-slate-200 bg-white hover:border-blue-400 hover:shadow-xs transition-all text-left flex items-center gap-3 cursor-pointer group">
               <div class="w-8 h-8 rounded-lg bg-blue-50 text-[#0B4DA8] group-hover:scale-105 transition-transform flex items-center justify-center font-bold">📥</div>
               <div>
                 <div class="text-xs font-bold text-slate-900 group-hover:text-[#0B4DA8]">+ Inward Stock</div>
@@ -2871,7 +3058,7 @@ var navigator = { userAgent: 'test' };
                     <p class="text-xs text-slate-500 mt-0.5">Physical intake batches and FIFO dispatch status</p>
                   </div>
                   <div class="flex items-center gap-2">
-                    <button onclick="setRoute('allocation')" class="px-3 py-1.5 rounded-lg bg-[#0B4DA8] hover:bg-[#093d85] text-white text-xs font-bold transition-all shadow-xs cursor-pointer">
+                    <button onclick="startNewConsignmentIntake()" class="px-3 py-1.5 rounded-lg bg-[#0B4DA8] hover:bg-[#093d85] text-white text-xs font-bold transition-all shadow-xs cursor-pointer">
                       + Inward Batch
                     </button>
                     <button onclick="setRoute('inventory')" class="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-all cursor-pointer">
@@ -3371,6 +3558,58 @@ var navigator = { userAgent: 'test' };
     // MULTI-STEP WAREHOUSE, BATCH & STORAGE ALLOCATION WORKFLOW ENGINE
     // =========================================================================
 
+    function startNewConsignmentIntake() {
+      // 1. If not on allocation page, switch route first
+      if (appState.activeRoute !== 'allocation') {
+        setRoute('allocation');
+      }
+
+      // 2. Initialize fresh intake session with clean values
+      initReceiveWorkflow();
+
+      // Enforce currentStep is 1 and clear any lock
+      if (appState.receiveWorkflow) {
+        appState.receiveWorkflow.currentStep = 1;
+        appState.receiveWorkflow.isSubmitting = false;
+      }
+
+      // 3. Render view so the fresh wizard is in DOM
+      renderCurrentRoute();
+
+      // 4. Scroll smoothly to the wizard inside #mainContainer
+      setTimeout(() => {
+        const mainCont = document.getElementById('mainContainer');
+        const wizardEl = document.getElementById('consignmentWizardAnchor');
+        if (wizardEl && mainCont) {
+          const mainRect = mainCont.getBoundingClientRect();
+          const elRect = wizardEl.getBoundingClientRect();
+          const targetScrollTop = mainCont.scrollTop + (elRect.top - mainRect.top) - 20;
+          mainCont.scrollTo({
+            top: Math.max(0, targetScrollTop),
+            behavior: 'smooth'
+          });
+
+          // Visual highlight animation
+          wizardEl.classList.remove('ring-4', 'ring-[#0B4DA8]/40', 'border-[#0B4DA8]');
+          void wizardEl.offsetWidth; // trigger reflow
+          wizardEl.classList.add('ring-4', 'ring-[#0B4DA8]/40', 'border-[#0B4DA8]', 'transition-all', 'duration-300');
+          setTimeout(() => {
+            wizardEl.classList.remove('ring-4', 'ring-[#0B4DA8]/40', 'border-[#0B4DA8]');
+          }, 2000);
+        }
+
+        // 5. Auto-focus the first editable input field
+        const focusInput = document.getElementById('wfSupplierName') || document.getElementById('wfConsignmentId');
+        if (focusInput) {
+          try { focusInput.focus(); } catch (e) {}
+        }
+      }, 60);
+
+      // 6. Affirmative feedback toast
+      const ref = appState.receiveWorkflow ? appState.receiveWorkflow.consignmentId : '';
+      showToast(`⚡ New Consignment Intake ready (${ref}). Enter inward details below.`);
+    }
+
     function initReceiveWorkflow() {
       const user = appState.currentUser;
       const isManager = !user || user.role === 'MANAGER';
@@ -3385,8 +3624,8 @@ var navigator = { userAgent: 'test' };
         consignmentId: generateUniqueConsignmentId(),
         supplierName: 'FCI Depot Karnal (Central Pool)',
         challanNumber: 'CHL-INW-' + String(Math.floor(1000 + Math.random() * 9000)),
-        arrivalDate: new Date().toISOString().substring(0, 10),
-        arrivalTime: '10:30',
+        arrivalDate: getTodayDateYMD(),
+        arrivalTime: getCurrentTime24(),
         commodity: 'Wheat',
         totalQuantity: 200,
         unit: 'Bags (50kg)',
@@ -3405,7 +3644,7 @@ var navigator = { userAgent: 'test' };
             zoneCode: 'ZONE-B',
             rack: '02',
             binCode: 'BAY-A-RACK-02-BIN-02',
-            receiptDate: new Date().toISOString().substring(0, 10),
+            receiptDate: getTodayDateYMD(),
             qualityStatus: 'Pending Inspection'
           }
         ],
@@ -3416,11 +3655,12 @@ var navigator = { userAgent: 'test' };
 
     function generateUniqueConsignmentId() {
       const existing = (appState.consignments || []).map(c => c.consignmentId);
+      const year = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).split('-')[0] || '2026';
       let rand = Math.floor(1000 + Math.random() * 9000);
-      let id = `CSG-2025-${rand}`;
+      let id = `CSG-${year}-${rand}`;
       while (existing.includes(id)) {
         rand = Math.floor(1000 + Math.random() * 9000);
-        id = `CSG-2025-${rand}`;
+        id = `CSG-${year}-${rand}`;
       }
       return id;
     }
@@ -4051,8 +4291,20 @@ var navigator = { userAgent: 'test' };
         submitBtn.innerHTML = '<span>⏳ Committing Intake Transaction...</span>';
       }
 
-      const receiptVoucherId = `RCV-${new Date().toISOString().substring(0, 7).replace('-', '')}-${Math.floor(1000 + Math.random() * 9000)}`;
-      const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
+      // Validate chronological integrity before committing
+      const dateValidation = validateDateSequence({
+        receiptDate: wf.arrivalDate
+      });
+      if (!dateValidation.valid) {
+        alert('Date Validation Error: ' + dateValidation.message);
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '<span>Confirm Placement & Update Stock</span>'; }
+        wf.isSubmitting = false;
+        return;
+      }
+
+      const receiptVoucherId = `RCV-${getTodayDateYMD().replace(/-/g, '').substring(0, 6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const nowUtcIso = getNowUTCISO();
+      const nowStr = formatDateTimeIST(new Date());
       const wh = (appState.warehouses || []).find(w => w.id === wf.destinationWarehouseId) || { name: 'Central Food Godown, Nagpur' };
 
       // 1. Create Batches (Strictly Pending Inspection - NOT FIFO eligible yet)
@@ -4063,7 +4315,11 @@ var navigator = { userAgent: 'test' };
           consignmentId: wf.consignmentId,
           receiptVoucherId: receiptVoucherId,
           commodity: alloc.commodity,
-          arrivalDate: wf.arrivalDate,
+          arrivalDate: formatDateIST(wf.arrivalDate),
+          receivedAt: nowUtcIso,
+          receivedAtIST: nowStr,
+          isDemo: false,
+          source: 'OPERATIONAL_INWARD',
           totalQuantity: alloc.quantity,
           availableQuantity: alloc.quantity,
           qualityStatus: 'Pending Inspection', // Strict requirement: Not approved automatically
@@ -5057,10 +5313,10 @@ function handleConfirmAllocation(batchId) {
             badge: 'PDS Allocation Protocol v2.5',
             badgeColor: 'blue',
             actions: `
-              <a href="#consignmentWizardAnchor" class="px-3.5 py-2 rounded-xl bg-[#0B4DA8] hover:bg-[#0A2F6B] text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer">
+              <button type="button" onclick="startNewConsignmentIntake()" class="px-3.5 py-2 rounded-xl bg-[#0B4DA8] hover:bg-[#0A2F6B] active:bg-[#082352] text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-                <span>Receive New Consignment</span>
-              </a>
+                <span>+ Receive New Consignment</span>
+              </button>
               ${isManager ? `
                 <button onclick="openWarehouseConfigModal()" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer" title="Configure Warehouses, Zones, and Bins">
                   <span>🏢 Warehouse Configuration</span>
@@ -6478,7 +6734,7 @@ function setInventorySort(field) {
                 <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                 <span>Export CSV</span>
               </button>
-              <button onclick="setRoute('allocation')" class="px-4 py-2 rounded-xl bg-[#0B4DA8] hover:bg-[#093d85] text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer">
+              <button onclick="startNewConsignmentIntake()" class="px-4 py-2 rounded-xl bg-[#0B4DA8] hover:bg-[#093d85] text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer">
                 <span>+ Receive Stock</span>
               </button>
             `
@@ -11667,8 +11923,8 @@ function setInventorySort(field) {
             <h3 class="text-sm font-bold text-[#0F172A] pb-2 border-b">Operational Invariants &amp; Parameters</h3>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
               <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                <span class="text-slate-400 block font-medium">DEMO_TODAY Simulation Anchor</span>
-                <span class="font-bold text-slate-800 font-mono text-sm">2025-10-24</span>
+                <span class="text-slate-400 block font-medium">Business Timezone & System Clock</span>
+                <span class="font-bold text-slate-800 font-mono text-xs sm:text-sm text-emerald-700">Asia/Kolkata (IST, UTC+05:30) · Live</span>
               </div>
               <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
                 <span class="text-slate-400 block font-medium">FIFO Invariant Enforcement</span>
@@ -13436,7 +13692,7 @@ function setInventorySort(field) {
                 </button>
 
                 <button
-                  onclick="setRoute('allocation')"
+                  onclick="startNewConsignmentIntake()"
                   class="px-3.5 py-2 bg-[#0B4DA8] hover:bg-[#0A2F6B] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                 >
                   <span>📥 Receive Stock</span>
@@ -15674,13 +15930,26 @@ function setInventorySort(field) {
       }
     }
 
-    function showToast(msg) {
-      document.getElementById('toastMessage').textContent = msg;
-      document.getElementById('toastContainer').classList.remove('hidden');
-      setTimeout(hideToast, 5000);
+    function showToast(msg, showUndo = false) {
+      const msgEl = document.getElementById('toastMessage');
+      const container = document.getElementById('toastContainer');
+      const undoBtn = document.getElementById('toastUndoBtn');
+      if (!msgEl || !container) return;
+      msgEl.textContent = msg;
+      if (undoBtn) {
+        if (showUndo === true) {
+          undoBtn.classList.remove('hidden');
+        } else {
+          undoBtn.classList.add('hidden');
+        }
+      }
+      container.classList.remove('hidden');
+      if (window._toastTimeout) clearTimeout(window._toastTimeout);
+      window._toastTimeout = setTimeout(hideToast, 4500);
     }
     function hideToast() {
-      document.getElementById('toastContainer').classList.add('hidden');
+      const container = document.getElementById('toastContainer');
+      if (container) container.classList.add('hidden');
     }
 
     // Modal Add Batch
@@ -20386,11 +20655,29 @@ Inventory balances and stock movement ledger updated.`);
       }
     }
 
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initApplication);
-    } else {
+    // Immediate multi-stage boot sequence
+    try {
+      sanitizeAppState();
       initApplication();
+    } catch (e) {
+      console.error('Initial initApplication attempt failed:', e);
     }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        sanitizeAppState();
+        initApplication();
+      });
+    }
+    window.addEventListener('load', () => {
+      sanitizeAppState();
+      initApplication();
+    });
+    setTimeout(initApplication, 0);
+    setTimeout(initApplication, 50);
+    setTimeout(initApplication, 150);
+    setTimeout(initApplication, 400);
+    setTimeout(initApplication, 1000);
   
 
 

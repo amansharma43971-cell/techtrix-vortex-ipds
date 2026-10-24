@@ -83,6 +83,28 @@ export const SEED_AUTH_USERS: AuthUser[] = [
     lastLogin: '2025-10-24 07:45 IST'
   },
   {
+    id: 'u-op-rakesh',
+    username: 'rakesh.operator@bhandarsetu.gov.in',
+    mustChangePassword: false,
+    passwordSalt: 'f35814c047db7a1fd4398938bcff3441',
+    passwordHash: '7f21504273884081fae7ec6abec78f202925086a8bd3ba16f1746ea15a470c21',
+    fullName: 'Rakesh Sharma',
+    role: 'WAREHOUSE_ADMIN',
+    roleTitle: 'Godown Operator / Warehouse Admin',
+    warehouseId: 'GDN-NGP-01',
+    warehouseName: 'Central Food Godown, Nagpur (Surajpur Depot)',
+    email: 'rakesh.operator@bhandarsetu.gov.in',
+    isActive: true,
+    permissions: [
+      'CREATE_INWARD',
+      'VIEW_INVENTORY',
+      'REQUEST_ALLOCATION',
+      'PREPARE_DISPATCH',
+      'UPDATE_DELIVERY'
+    ],
+    lastLogin: '2026-10-24 09:15 IST'
+  },
+  {
     id: 'u-admin-pun',
     username: 'admin.pune@bhandarsetu.gov.in',
     mustChangePassword: false,

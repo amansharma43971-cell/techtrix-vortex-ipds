@@ -18,7 +18,18 @@ import aiosmtplib
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("bhandarsetu-worker")
 
-DB_URL = os.getenv("DATABASE_URL", "postgresql://pds_admin:pds_secret_2026@postgres:5432/bhandarsetu")
+def get_db_url() -> str:
+    url = os.getenv("DATABASE_URL")
+    if url:
+        return url
+    user = os.getenv("POSTGRES_USER", "pds_admin")
+    password = os.getenv("POSTGRES_PASSWORD", "pds_secure_password")
+    host = os.getenv("POSTGRES_HOST", "postgres")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    db_name = os.getenv("POSTGRES_DB", "bhandarsetu")
+    return f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+
+DB_URL = get_db_url()
 SMTP_HOST = os.getenv("SMTP_HOST", "mailhog")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "1025"))
 POLL_INTERVAL_SEC = 5

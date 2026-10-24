@@ -34,7 +34,8 @@ INSERT INTO users (id, username, full_name, role, warehouse_id) VALUES
 ('u0000003-0000-0000-0000-000000000003', 'qo_anita', 'Dr. Anita Rao (Quality Inspector)', 'QUALITY_OFFICER', '11111111-1111-1111-1111-111111111111'),
 ('u0000004-0000-0000-0000-000000000004', 'appr_deshmukh', 'V. K. Deshmukh (District Supply Officer)', 'APPROVER', '11111111-1111-1111-1111-111111111111'),
 ('u0000005-0000-0000-0000-000000000005', 'aud_sharma', 'P. K. Sharma (State PDS Vigilance Auditor)', 'AUDITOR', NULL),
-('u0000006-0000-0000-0000-000000000006', 'admin_sys', 'PDS Systems Administrator', 'ADMIN', NULL);
+('u0000006-0000-0000-0000-000000000006', 'admin_sys', 'PDS Systems Administrator', 'ADMIN', NULL),
+('u0000007-0000-0000-0000-000000000007', 'emp_rakesh', 'Rakesh Sharma (Store Keeper)', 'STORE_EMPLOYEE', '11111111-1111-1111-1111-111111111111');
 
 -- ----------------------------------------------------------------------------
 -- 4. Ration Shops (Fair Price Shops - 10 Nagpur, 10 Pune)

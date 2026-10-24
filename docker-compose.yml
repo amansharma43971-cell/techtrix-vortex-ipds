@@ -6,11 +6,12 @@ services:
     container_name: bhandarsetu-postgres
     restart: always
     environment:
-      POSTGRES_DB: bhandarsetu
-      POSTGRES_USER: pds_admin
-      POSTGRES_PASSWORD: pds_secret_2026
+      POSTGRES_DB: ${POSTGRES_DB:-bhandarsetu}
+      POSTGRES_USER: ${POSTGRES_USER:-pds_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pds_secure_password}
+    # Restrict PostgreSQL exposure strictly to local loopback interface for security
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
@@ -26,7 +27,7 @@ services:
       - ./db/tests:/db/tests:ro
       - ./db/loadtest:/db/loadtest:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pds_admin -d bhandarsetu"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pds_admin} -d ${POSTGRES_DB:-bhandarsetu}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -40,7 +41,13 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://pds_admin:pds_secret_2026@postgres:5432/bhandarsetu
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-pds_admin}:${POSTGRES_PASSWORD:-pds_secure_password}@postgres:5432/${POSTGRES_DB:-bhandarsetu}}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,9 +59,9 @@ services:
     container_name: bhandarsetu-worker
     restart: always
     environment:
-      DATABASE_URL: postgresql://pds_admin:pds_secret_2026@postgres:5432/bhandarsetu
-      SMTP_HOST: mailhog
-      SMTP_PORT: 1025
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-pds_admin}:${POSTGRES_PASSWORD:-pds_secure_password}@postgres:5432/${POSTGRES_DB:-bhandarsetu}}
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,9 +72,11 @@ services:
     image: mailhog/mailhog:latest
     container_name: bhandarsetu-mailhog
     restart: always
+    # SMTP is internal to Docker network; only Web UI is exposed to host for testing
     ports:
-      - "1025:1025" # SMTP port
       - "8025:8025" # Web UI
+    expose:
+      - "1025" # SMTP port kept internal
 
   web:
     build:
@@ -78,7 +87,7 @@ services:
     ports:
       - "3000:80"
     environment:
-      VITE_API_BASE: http://localhost:8000
+      VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8000}
     depends_on:
       - api
 

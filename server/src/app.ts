@@ -19,9 +19,13 @@ const __dirname = path.dirname(__filename);
 export async function buildApp() {
   const app = Fastify({ logger: false });
 
+  const allowedOriginsEnv = process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173';
+  const allowedOrigins = allowedOriginsEnv.split(',').map(s => s.trim()).filter(Boolean);
+
   await app.register(cors, {
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+    origin: allowedOrigins,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: true
   });
 
   // Health check
@@ -31,17 +35,19 @@ export async function buildApp() {
   // 1. Auth & Session
   // ---------------------------------------------------------------------------
   app.post('/api/auth/login', async (req, reply) => {
-    const { username, role } = req.body as any;
-    let user = db.prepare('SELECT * FROM users WHERE username = ?').get(username) as any;
-    if (!user && role) {
-      user = db.prepare('SELECT * FROM users WHERE role = ?').get(role) as any;
-    }
-    if (!user) {
-      user = db.prepare('SELECT * FROM users WHERE username = "operator"').get() as any;
+    const { username, password } = req.body as any;
+    if (!username) {
+      return reply.status(400).send({ error: 'Username is required.' });
     }
 
+    const user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(username.trim()) as any;
+    if (!user) {
+      return reply.status(401).send({ error: 'Authentication failed. Invalid username or credentials.' });
+    }
+
+    const token = `BS-AUTH-${crypto.randomBytes(24).toString('hex')}`;
     return {
-      token: `jwt-mock-token-${user.id}`,
+      token,
       user: {
         id: user.id,
         username: user.username,

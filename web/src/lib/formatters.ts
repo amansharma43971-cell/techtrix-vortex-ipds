@@ -82,3 +82,38 @@ export function calculateAgeDays(receivedDateStr: string): number {
   return Math.floor(diffTime / (1000 * 60 * 60 * 24));
 }
 
+
+/**
+ * Formats date and time consistently to DD-MM-YYYY hh:mm AM/PM in Asia/Kolkata (IST).
+ */
+export function formatDateTimeIST(dateInput: string | Date | null | undefined): string {
+  if (!dateInput) return '—';
+  const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+  if (isNaN(d.getTime())) return '—';
+  const f = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+  return f.format(d).replace(/\//g, '-');
+}
+
+/**
+ * Formats date consistently to DD-MM-YYYY in Asia/Kolkata (IST).
+ */
+export function formatDateIST(dateInput: string | Date | null | undefined): string {
+  if (!dateInput) return '—';
+  const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+  if (isNaN(d.getTime())) return '—';
+  const f = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  });
+  return f.format(d).replace(/\//g, '-');
+}

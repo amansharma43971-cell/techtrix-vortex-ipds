@@ -30,7 +30,7 @@ test:
 	docker compose exec postgres bash /db/tests/run_tests.sh
 
 seed:
-	docker compose exec postgres psql -U pds_admin -d bhandarsetu -f /docker-entrypoint-initdb.d/05_seed.sql
+	docker compose exec postgres psql -U pds_admin -d bhandarsetu -f /docker-entrypoint-initdb.d/09_seed.sql
 
 demo:
 	docker compose exec postgres psql -U pds_admin -d bhandarsetu -f /db/demo.sql

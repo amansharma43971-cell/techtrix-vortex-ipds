@@ -15,7 +15,7 @@ export default {
           navy: 'var(--brand-navy)'
         },
         surface: {
-          app: 'var(--bg-app)',
+          app:  'var(--bg-app)',
           DEFAULT: 'var(--bg-surface)',
           elevated: 'var(--bg-surface-elevated)',
           subtle: 'var(--bg-subtle)'

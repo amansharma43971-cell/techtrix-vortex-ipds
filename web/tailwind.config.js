@@ -9,7 +9,7 @@ export default {
     extend: {
       colors: {
         brand: {
-          accent: 'var(--brand-accent)',
+          accent:  'var(--brand-accent)',
           hover: 'var(--brand-accent-hover)',
           subtle: 'var(--brand-accent-subtle)',
           navy: 'var(--brand-navy)'
